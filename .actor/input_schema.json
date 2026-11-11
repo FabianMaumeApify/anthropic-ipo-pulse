@@ -1,0 +1,103 @@
+{
+    "$schema": "https://apify.com/schemas/v1/input.ide.json",
+    "title": "Anthropic IPO Pulse",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "mode": {
+            "title": "Mode",
+            "type": "string",
+            "description": "backfill: rebuild the baseline for a date range. daily: add yesterday to the baseline (schedule once a day). news: sweep MarketWatch and Yahoo news only (schedule every 2 hours, the feeds are rolling windows). live: D-day snapshot of the last N minutes across every platform (schedule every 10 minutes).",
+            "editor": "select",
+            "enum": ["backfill", "daily", "news", "live"],
+            "enumTitles": ["Backfill a date range", "Daily baseline update", "News sweep", "Live (D-day)"],
+            "default": "daily"
+        },
+        "dateFrom": {
+            "title": "From date (UTC)",
+            "type": "string",
+            "description": "First day to collect in backfill or daily mode, YYYY-MM-DD. Defaults to 2026-11-05 for backfill and yesterday for daily.",
+            "editor": "textfield",
+            "prefill": "2026-11-05"
+        },
+        "dateTo": {
+            "title": "To date (UTC)",
+            "type": "string",
+            "description": "Last day to collect, inclusive, YYYY-MM-DD. Defaults to yesterday.",
+            "editor": "textfield"
+        },
+        "xQuery": {
+            "title": "X search query",
+            "type": "string",
+            "description": "One X advanced-search query. The Actor adds since:/until: per day.",
+            "editor": "textfield",
+            "default": "(\"Anthropic IPO\" OR \"$ANT\" OR \"Anthropic stock\" OR \"Anthropic valuation\" OR \"Anthropic shares\") -filter:retweets"
+        },
+        "searchQueries": {
+            "title": "LinkedIn and YouTube search terms",
+            "type": "array",
+            "description": "Search terms passed to the LinkedIn and YouTube Actors.",
+            "editor": "stringList",
+            "default": ["Anthropic IPO", "Anthropic stock", "Anthropic valuation"]
+        },
+        "liveTicker": {
+            "title": "Main ticker",
+            "type": "string",
+            "description": "The ticker the tracker is about. Use another listed ticker (for example NVDA) to rehearse D-day.",
+            "editor": "textfield",
+            "default": "ANT"
+        },
+        "peerTickers": {
+            "title": "Peer tickers",
+            "type": "array",
+            "description": "Quoted next to the main ticker and used to find Anthropic stories on Yahoo Finance.",
+            "editor": "stringList",
+            "default": ["AMZN", "GOOGL", "NVDA", "MSFT", "QQQ"]
+        },
+        "llmModel": {
+            "title": "Sentiment model (OpenRouter)",
+            "type": "string",
+            "description": "Model id used through the Apify OpenRouter Actor to score each post.",
+            "editor": "textfield",
+            "default": "google/gemini-2.5-flash"
+        },
+        "maxXPagesPerDay": {
+            "title": "Max X pages per day",
+            "type": "integer",
+            "description": "About 20 tweets per page at $0.004 per page. When the limit is hit, that day's X volume is flagged as a floor.",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 10
+        },
+        "maxLinkedInPostsPerQuery": {
+            "title": "Max LinkedIn posts per query per day",
+            "type": "integer",
+            "description": "Multiplied by the number of days in the range.",
+            "minimum": 1,
+            "default": 50
+        },
+        "maxYouTubeVideosPerQuery": {
+            "title": "Max YouTube videos per query per day",
+            "type": "integer",
+            "description": "Multiplied by the number of days in the range (up to 4).",
+            "minimum": 1,
+            "default": 25
+        },
+        "liveWindowMinutes": {
+            "title": "Live window (minutes)",
+            "type": "integer",
+            "description": "In live mode, how far back the snapshot looks.",
+            "minimum": 10,
+            "maximum": 1440,
+            "default": 60
+        },
+        "storeName": {
+            "title": "Storage name",
+            "type": "string",
+            "description": "Name of the key-value store (and the <name>-posts dataset) the website reads.",
+            "editor": "textfield",
+            "default": "anthropic-ipo"
+        }
+    },
+    "required": []
+}

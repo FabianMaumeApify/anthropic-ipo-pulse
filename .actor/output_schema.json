@@ -1,0 +1,17 @@
+{
+    "$schema": "https://apify.com/schemas/v1/output.ide.json",
+    "actorOutputSchemaVersion": 1,
+    "title": "Anthropic IPO Pulse output",
+    "properties": {
+        "posts": {
+            "type": "string",
+            "title": "Scored posts from this run",
+            "template": "{{links.apiDefaultDatasetUrl}}/items"
+        },
+        "subDatasets": {
+            "type": "string",
+            "title": "Sub-Actor datasets",
+            "template": "{{links.apiDefaultKeyValueStoreUrl}}/records/SUB_DATASETS"
+        }
+    }
+}

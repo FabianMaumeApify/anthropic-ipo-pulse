@@ -1,0 +1,20 @@
+{
+	"$schema": "https://apify.com/schemas/v1/actor.ide.json",
+	"actorSpecification": 1,
+	"name": "anthropic-ipo-pulse",
+	"title": "Anthropic IPO Pulse",
+	"description": "Orchestrates X, LinkedIn, YouTube, stock-news and market-data Actors to track volume, sentiment and the most extreme bull/bear takes around the Anthropic (ANT) IPO.",
+	"version": "0.1",
+	"buildTag": "latest",
+	"defaultMemoryMbytes": 1024,
+	"meta": {
+		"templateId": "ts-empty",
+		"generatedBy": "Claude Code with Claude Opus 5.5"
+	},
+	"inputSchema": "./input_schema.json",
+	"outputSchema": "./output_schema.json",
+	"storages": {
+		"dataset": "./dataset_schema.json"
+	},
+	"dockerfile": "../Dockerfile"
+}

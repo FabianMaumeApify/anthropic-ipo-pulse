@@ -1,0 +1,46 @@
+{
+    "$schema": "https://apify.com/schemas/v1/dataset.ide.json",
+    "actorSpecification": 1,
+    "fields": {
+        "type": "object",
+        "properties": {
+            "platform": { "type": "string", "enum": ["x", "linkedin", "youtube", "news"] },
+            "id": { "type": "string" },
+            "url": { "type": "string" },
+            "author": { "type": "string" },
+            "authorUrl": { "type": ["string", "null"] },
+            "text": { "type": "string" },
+            "publishedAt": { "type": "string" },
+            "engagement": { "type": "number" },
+            "source": { "type": "string" },
+            "relevant": { "type": "boolean" },
+            "score": { "type": ["number", "null"] },
+            "stance": { "type": ["string", "null"] },
+            "extremeness": { "type": ["number", "null"] },
+            "mode": { "type": "string" },
+            "collectedAt": { "type": "string" }
+        }
+    },
+    "views": {
+        "overview": {
+            "title": "Scored posts",
+            "transformation": {
+                "fields": ["platform", "publishedAt", "author", "text", "stance", "score", "extremeness", "engagement", "url"]
+            },
+            "display": {
+                "component": "table",
+                "properties": {
+                    "platform": { "label": "Platform" },
+                    "publishedAt": { "label": "Published", "format": "date" },
+                    "author": { "label": "Author" },
+                    "text": { "label": "Text" },
+                    "stance": { "label": "Stance" },
+                    "score": { "label": "Sentiment", "format": "number" },
+                    "extremeness": { "label": "Extremeness", "format": "number" },
+                    "engagement": { "label": "Engagement", "format": "number" },
+                    "url": { "label": "Link", "format": "link" }
+                }
+            }
+        }
+    }
+}
