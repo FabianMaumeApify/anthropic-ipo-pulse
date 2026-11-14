@@ -38,6 +38,11 @@ export async function standby<T>(actor: string, path: string, opts: StandbyOptio
             });
             if (!res.ok) {
                 const text = (await res.text()).slice(0, 300);
+                // apidojo/x-api answers 429 "Monthly run limit exceeded per user" on accounts without a
+                // paid Apify plan. Retrying cannot help, so fail with a message that says what to do.
+                if (res.status === 429 && /monthly run limit/i.test(text)) {
+                    throw new Error(`${actor} refused the request: monthly limit for this Apify account (needs a paid plan). ${text}`);
+                }
                 // 4xx other than 429 will not get better on retry
                 if (res.status < 500 && res.status !== 429) throw new Error(`${actor}${path} ${res.status}: ${text}`);
                 throw Object.assign(new Error(`${actor}${path} ${res.status}: ${text}`), { retryable: true });

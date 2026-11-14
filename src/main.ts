@@ -134,7 +134,11 @@ if (mode === 'backfill' || mode === 'daily') {
         safe(
             'LinkedIn',
             async () => {
-                const r = await collectLinkedIn(client, costs, searchQueries, { sinceDate: dateFrom, maxPerQuery: maxLinkedIn * days.length });
+                const r = await collectLinkedIn(client, costs, searchQueries, {
+                    sinceDate: dateFrom,
+                    maxPerQuery: maxLinkedIn * days.length,
+                    sortBy: days.length > 1 ? 'relevance' : 'date',
+                });
                 capped.linkedin = r.capped;
                 if (r.datasetUrl) subDatasets.push({ name: LINKEDIN_ACTOR, resultUrl: r.datasetUrl });
                 return r.posts;

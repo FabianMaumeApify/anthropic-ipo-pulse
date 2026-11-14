@@ -86,12 +86,14 @@ export async function collectLinkedIn(
     client: ExtendedApifyClient,
     costs: CostTracker,
     queries: string[],
-    opts: { sinceDate?: string; postedLimit?: string; maxPerQuery: number },
+    opts: { sinceDate?: string; postedLimit?: string; maxPerQuery: number; sortBy?: 'date' | 'relevance' },
 ): Promise<BatchResult> {
     const input: Record<string, unknown> = {
         searchQueries: queries,
         maxPosts: opts.maxPerQuery,
-        sortBy: 'date',
+        // "date" returns newest first, so a multi-day window only reaches back a few hours on busy
+        // days. "relevance" spreads the sample across the whole window (used for backfills).
+        sortBy: opts.sortBy ?? 'date',
         profileScraperMode: 'short',
     };
     if (opts.sinceDate) input.postedLimitDate = opts.sinceDate;
