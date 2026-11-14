@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { aggregate, forDisplay, mergeAgg } from '../src/aggregate.js';
+import { aggregate, forDisplay, mergeAgg, pickForScoring } from '../src/aggregate.js';
 import type { ScoredPost } from '../src/types.js';
 
 const post = (over: Partial<ScoredPost>): ScoredPost => ({
@@ -28,7 +28,9 @@ describe('aggregate', () => {
             post({ score: null, stance: null, extremeness: null }),
         ]);
         expect(agg.volume).toBe(4);
+        // 2 of the 3 judged posts are relevant, so 4 × 2/3 ≈ 3 posts are estimated relevant
         expect(agg.relevant).toBe(3);
+        expect(agg.sampled).toBe(3);
         expect(agg.scored).toBe(2);
         expect(agg.bull).toBe(1);
         expect(agg.bear).toBe(1);
@@ -54,5 +56,32 @@ describe('aggregate', () => {
         expect(m.volume).toBe(10);
         expect(m.bull).toBe(10);
         expect(forDisplay(m).topBull).toHaveLength(3);
+    });
+});
+
+describe('sampled scoring', () => {
+    it('extrapolates relevant volume from the scored sample', () => {
+        const judgedRelevant = Array.from({ length: 3 }, (_, i) => post({ text: `Relevant judged take ${i} about the Anthropic IPO pricing` }));
+        const judgedIrrelevant = post({ relevant: false, score: 0, stance: 'neutral', extremeness: 0 });
+        const unjudged = Array.from({ length: 6 }, () => post({ score: null, stance: null, extremeness: null }));
+        const agg = aggregate([...judgedRelevant, judgedIrrelevant, ...unjudged]);
+        expect(agg.volume).toBe(10);
+        expect(agg.sampled).toBe(4);
+        expect(agg.relevant).toBe(8); // 10 × 3/4, rounded
+    });
+
+    it('caps each platform-day and always keeps the most-engaged posts', () => {
+        const posts = Array.from({ length: 50 }, (_, i) => ({
+            id: `p${i}`,
+            platform: 'x',
+            publishedAt: `2026-11-10T${String(Math.floor(i / 3)).padStart(2, '0')}:00:00.000Z`,
+            engagement: i === 7 ? 10_000 : i,
+        }));
+        const other = { id: 'li1', platform: 'linkedin', publishedAt: '2026-11-10T12:00:00.000Z', engagement: 1 };
+        const picked = pickForScoring([...posts, other], 9);
+        expect(picked.filter((p) => p.platform === 'x')).toHaveLength(9);
+        expect(picked.some((p) => p.id === 'p7')).toBe(true);
+        expect(picked.some((p) => p.id === 'li1')).toBe(true);
+        expect(new Set(picked.map((p) => p.id)).size).toBe(picked.length);
     });
 });

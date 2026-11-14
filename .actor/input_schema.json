@@ -7,19 +7,21 @@
         "mode": {
             "title": "Mode",
             "type": "string",
-            "description": "backfill: rebuild the baseline for a date range. daily: add yesterday to the baseline (schedule once a day, just after midnight UTC). news: sweep MarketWatch and Yahoo news only (schedule every 2 hours, the feeds are rolling windows). live: D-day snapshot of the last N minutes for X, Threads, news and quotes (schedule every 15 minutes).",
+            "description": "backfill: rebuild the baseline for a date range. daily: add yesterday to the baseline (schedule once a day, just after midnight UTC). news: sweep MarketWatch and Yahoo news only (schedule every 2 hours, the feeds are rolling windows). live: D-day snapshot of the last N minutes for X, Threads, news and quotes (schedule every 15 minutes). rescore: no scraping; re-scores posts already saved in the <storeName>-posts dataset for the date range and rebuilds those days.",
             "editor": "select",
             "enum": [
                 "backfill",
                 "daily",
                 "news",
-                "live"
+                "live",
+                "rescore"
             ],
             "enumTitles": [
                 "Backfill a date range",
                 "Daily baseline update",
                 "News sweep",
-                "Live (D-day)"
+                "Live (D-day)",
+                "Rescore saved posts"
             ],
             "default": "daily"
         },
@@ -122,6 +124,13 @@
             "description": "Live mode. Threads shows logged-out visitors 20 to 60 posts per keyword, so a small number is enough.",
             "minimum": 1,
             "default": 20
+        },
+        "maxScoredPerPlatformDay": {
+            "title": "Max posts scored per platform per day",
+            "type": "integer",
+            "description": "LLM sentiment sample per platform per UTC day: the most-engaged third plus an even spread of the rest. Volume still counts every collected post, scaled by the relevance rate of the sample.",
+            "minimum": 20,
+            "default": 300
         },
         "liveWindowMinutes": {
             "title": "Live window (minutes)",

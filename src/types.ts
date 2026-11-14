@@ -1,7 +1,7 @@
 export type Platform = 'x' | 'linkedin' | 'youtube' | 'news' | 'threads';
 export const PLATFORMS: Platform[] = ['x', 'linkedin', 'youtube', 'news', 'threads'];
 
-export type Mode = 'backfill' | 'daily' | 'news' | 'live';
+export type Mode = 'backfill' | 'daily' | 'news' | 'live' | 'rescore';
 
 export interface Post {
     platform: Platform;
@@ -38,7 +38,8 @@ export interface QuoteCard {
 /** Mergeable per-day, per-platform aggregate (sums, not averages, so news sweeps can add up). */
 export interface Agg {
     volume: number; // posts collected (after dedupe, before relevance filter)
-    relevant: number; // posts the scorer judged to be about Anthropic
+    relevant: number; // estimated posts about Anthropic: volume × relevance rate of the scored sample
+    sampled?: number; // posts the LLM judged (the rest are counted for volume only)
     engagement: number;
     scored: number;
     sentimentSum: number;

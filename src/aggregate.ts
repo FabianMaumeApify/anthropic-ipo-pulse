@@ -50,15 +50,25 @@ function rank(cards: QuoteCard[]): QuoteCard[] {
         });
 }
 
+/** A post the LLM actually judged (unscored posts have no stance). */
+const judged = (p: ScoredPost) => p.stance != null;
+
+/**
+ * Volume counts every collected post. Only a sample is scored, so the number of relevant posts is
+ * volume × the relevance rate seen in the scored sample (every post counts when none was scored).
+ */
 export function aggregate(posts: ScoredPost[], capped = false): Agg {
     const agg = emptyAgg();
     agg.capped = capped;
+    agg.volume = posts.length;
+    const sample = posts.filter(judged);
+    agg.sampled = sample.length;
+    const rate = sample.length ? sample.filter((p) => p.relevant).length / sample.length : 1;
+    agg.relevant = Math.round(posts.length * rate);
     const bulls: QuoteCard[] = [];
     const bears: QuoteCard[] = [];
     for (const p of posts) {
-        agg.volume++;
-        if (!p.relevant) continue;
-        agg.relevant++;
+        if (!p.relevant) continue; // unscored posts are relevant: true, judged irrelevant ones are not
         agg.engagement += p.engagement;
         if (p.score == null) continue;
         agg.scored++;
@@ -83,6 +93,7 @@ export function mergeAgg(a: Agg | undefined, b: Agg): Agg {
         relevant: a.relevant + b.relevant,
         engagement: a.engagement + b.engagement,
         scored: a.scored + b.scored,
+        sampled: (a.sampled ?? 0) + (b.sampled ?? 0),
         sentimentSum: a.sentimentSum + b.sentimentSum,
         bull: a.bull + b.bull,
         bear: a.bear + b.bear,
@@ -97,6 +108,34 @@ export function mergeAgg(a: Agg | undefined, b: Agg): Agg {
 /** Trim quote pools to what the site shows. */
 export function forDisplay(agg: Agg): Agg {
     return { ...agg, topBull: agg.topBull.slice(0, QUOTES_PER_SIDE), topBear: agg.topBear.slice(0, QUOTES_PER_SIDE) };
+}
+
+/**
+ * Picks which posts to send to the LLM: per platform and UTC day, up to `cap` posts. The most-engaged
+ * third always goes in (they make the quote wall); the rest is an even spread across the day.
+ */
+export function pickForScoring<T extends { platform: string; publishedAt: string; engagement: number; id: string }>(posts: T[], cap: number): T[] {
+    const groups = new Map<string, T[]>();
+    for (const p of posts) {
+        const key = `${p.platform}|${p.publishedAt.slice(0, 10)}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key)!.push(p);
+    }
+    const picked: T[] = [];
+    for (const group of groups.values()) {
+        if (group.length <= cap) {
+            picked.push(...group);
+            continue;
+        }
+        const top = [...group].sort((a, b) => b.engagement - a.engagement).slice(0, Math.floor(cap / 3));
+        const topIds = new Set(top.map((p) => p.id));
+        const rest = group.filter((p) => !topIds.has(p.id)).sort((a, b) => a.publishedAt.localeCompare(b.publishedAt));
+        const need = cap - top.length;
+        const step = rest.length / need;
+        picked.push(...top);
+        for (let i = 0; i < need; i++) picked.push(rest[Math.floor(i * step)]);
+    }
+    return picked;
 }
 
 export function utcDay(iso: string): string {

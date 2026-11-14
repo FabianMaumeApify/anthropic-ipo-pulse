@@ -72,9 +72,19 @@ export async function scorePosts(
     posts: Post[],
     opts: { model: string; batchSize?: number; concurrency?: number; costs: CostTracker },
 ): Promise<ScoredPost[]> {
-    const { model, batchSize = 20, concurrency = 4, costs } = opts;
+    const { model, batchSize = 20, concurrency = 8, costs } = opts;
+    // Interleave platforms so that, if the LLM budget runs out, every platform still has scores
+    // (a backfill once spent the whole share on X before reaching LinkedIn, YouTube and Threads).
+    const byPlatform = new Map<string, Post[]>();
+    for (const p of posts) {
+        if (!byPlatform.has(p.platform)) byPlatform.set(p.platform, []);
+        byPlatform.get(p.platform)!.push(p);
+    }
+    const queues = [...byPlatform.values()];
+    const ordered: Post[] = [];
+    for (let i = 0; ordered.length < posts.length; i++) for (const q of queues) if (i < q.length) ordered.push(q[i]);
     const batches: Post[][] = [];
-    for (let i = 0; i < posts.length; i += batchSize) batches.push(posts.slice(i, i + batchSize));
+    for (let i = 0; i < ordered.length; i += batchSize) batches.push(ordered.slice(i, i + batchSize));
 
     const results = new Map<string, LlmResult>();
     let failed = 0;
@@ -98,6 +108,9 @@ export async function scorePosts(
     };
     await Promise.all(Array.from({ length: Math.min(concurrency, batches.length) }, worker));
     log.info(`Scored ${results.size}/${posts.length} posts with ${model} (${failed} failed batches)`);
+    if (results.size < posts.length && !costs.canSpend('llm', 0.002)) {
+        log.warning('LLM budget share ran out before every sampled post was scored; raise the run\'s max total charge.');
+    }
     if (posts.length && results.size === 0) {
         log.error('No post could be scored. Check that this Apify account can use apify/openrouter (paid plan).');
     }

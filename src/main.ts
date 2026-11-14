@@ -1,7 +1,7 @@
 import { Actor, log } from 'apify';
 import { Orchestrator, type ExtendedApifyClient } from 'apify-orchestrator';
 
-import { aggregate, byPlatform, emptyAgg, forDisplay, groupByDay, mergeAgg, utcDay } from './aggregate.js';
+import { aggregate, byPlatform, emptyAgg, forDisplay, groupByDay, mergeAgg, pickForScoring, utcDay } from './aggregate.js';
 import { collectQuotes, collectTickerSentiment, NASDAQ_ACTOR, SENTIMENT_ACTOR, YAHOO_ACTOR } from './collectors/markets.js';
 import { collectNews, MARKETWATCH_ACTOR } from './collectors/news.js';
 import { collectLinkedIn, collectThreads, collectYouTube, LINKEDIN_ACTOR, THREADS_ACTOR, YOUTUBE_ACTOR } from './collectors/social.js';
@@ -26,6 +26,7 @@ interface Input {
     maxYouTubeVideosPerQuery?: number;
     maxThreadsPostsPerQuery?: number;
     maxThreadsPostsLive?: number;
+    maxScoredPerPlatformDay?: number;
     liveWindowMinutes?: number;
     storeName?: string;
 }
@@ -49,13 +50,16 @@ const maxLinkedIn = input.maxLinkedInPostsPerQuery ?? 50;
 const maxYouTube = input.maxYouTubeVideosPerQuery ?? 25;
 const maxThreads = input.maxThreadsPostsPerQuery ?? 30;
 const maxThreadsLive = input.maxThreadsPostsLive ?? 20;
+// LLM sample per platform per UTC day; volume still counts every collected post.
+const scoreCap = input.maxScoredPerPlatformDay ?? 300;
+const SOCIAL = ['x', 'linkedin', 'youtube', 'threads'] as const;
 // Matches the D-day schedule (every 15 min), so consecutive snapshots don't overlap.
 const liveWindow = input.liveWindowMinutes ?? 15;
 const storeName = input.storeName ?? 'anthropic-ipo';
 
 const today = utcDay(new Date().toISOString());
 const yesterday = utcDay(new Date(Date.now() - 86_400_000).toISOString());
-const dateFrom = input.dateFrom ?? (mode === 'backfill' ? '2026-11-05' : yesterday);
+const dateFrom = input.dateFrom ?? (mode === 'backfill' || mode === 'rescore' ? '2026-11-05' : yesterday);
 const dateTo = input.dateTo ?? yesterday;
 
 function daysBetween(from: string, to: string): string[] {
@@ -212,28 +216,52 @@ if (mode === 'live') {
     );
 }
 
-// News runs in every mode: the feeds are rolling windows, so each sweep adds what is new.
-const seenNews = await store.seenNews();
-tasks.push(
-    safe(
-        'News',
-        async () => {
-            const items = await collectNews(peers.filter((p) => p !== 'QQQ'), costs);
-            return items;
-        },
-        [],
-    ),
-);
+const postsDataset = await Actor.openDataset(`${storeName}-posts`, { forceCloud: true });
 
-const marketsTask = Promise.all([
-    safe('Quotes', () => collectQuotes([liveTicker, ...peers], costs), []),
-    safe('Ticker sentiment', () => collectTickerSentiment([liveTicker, ...peers.filter((p) => p !== 'QQQ')], costs), []),
-]);
+// rescore: no scraping. Re-read the posts already saved for the range and score the unscored ones.
+if (mode === 'rescore') {
+    tasks.push(
+        safe(
+            'Load saved posts',
+            async () => {
+                const best = new Map<string, ScoredPost>();
+                for (let offset = 0; ; offset += 1000) {
+                    const page = await postsDataset.getData({ offset, limit: 1000 });
+                    for (const row of page.items as unknown as ScoredPost[]) {
+                        if (!(SOCIAL as readonly string[]).includes(row.platform)) continue;
+                        const d = utcDay(row.publishedAt);
+                        if (d < dateFrom || d > dateTo) continue;
+                        const prev = best.get(row.id);
+                        if (!prev || (prev.stance == null && row.stance != null)) best.set(row.id, row);
+                    }
+                    if (page.items.length < 1000) break;
+                }
+                log.info(`Loaded ${best.size} saved posts for ${dateFrom} → ${dateTo}`);
+                return [...best.values()];
+            },
+            [],
+        ),
+    );
+}
+
+// News runs in every collecting mode: the feeds are rolling windows, so each sweep adds what is new.
+const seenNews = await store.seenNews();
+if (mode !== 'rescore') {
+    tasks.push(safe('News', () => collectNews(peers.filter((p) => p !== 'QQQ'), costs), []));
+}
+
+const marketsTask =
+    mode === 'rescore'
+        ? Promise.resolve([[], []] as [Awaited<ReturnType<typeof collectQuotes>>, Awaited<ReturnType<typeof collectTickerSentiment>>])
+        : Promise.all([
+              safe('Quotes', () => collectQuotes([liveTicker, ...peers], costs), []),
+              safe('Ticker sentiment', () => collectTickerSentiment([liveTicker, ...peers.filter((p) => p !== 'QQQ')], costs), []),
+          ]);
 
 const collected = (await Promise.all(tasks)).flat();
 const [quotes, tickerSentiment] = await marketsTask;
 
-// Dedupe by id; X Latest + Top overlap, news appears on several peers' pages.
+// Dedupe by id; news appears on several peers' pages.
 const unique = [...new Map(collected.map((p) => [p.id, p])).values()];
 const windowStart = new Date(Date.now() - liveWindow * 60_000);
 const inScope = unique.filter((p) => {
@@ -245,14 +273,22 @@ const inScope = unique.filter((p) => {
 log.info(`Collected ${collected.length} items, ${unique.length} unique, ${inScope.length} in scope`);
 
 // ---------------------------------------------------------------------------
-// 2. Score with an LLM via the Apify OpenRouter Standby Actor
+// 2. Score a sample with an LLM via the Apify OpenRouter Standby Actor
+//    (up to scoreCap posts per platform per day; news is always scored in full)
 // ---------------------------------------------------------------------------
-const scored: ScoredPost[] = await scorePosts(inScope, { model: llmModel, costs });
+const alreadyJudged = (p: Post) => (p as ScoredPost).stance != null;
+const candidates = [...inScope.filter((p) => p.platform === 'news'), ...pickForScoring(inScope.filter((p) => p.platform !== 'news'), scoreCap)];
+const toScore = candidates.filter((p) => !alreadyJudged(p));
+const fresh = await scorePosts(toScore, { model: llmModel, costs });
+const freshById = new Map(fresh.map((p) => [p.id, p]));
+const unscored = (p: Post): ScoredPost => ({ ...p, relevant: true, score: null, stance: null, extremeness: null });
+const scored: ScoredPost[] = inScope.map((p) => freshById.get(p.id) ?? (alreadyJudged(p) ? (p as ScoredPost) : unscored(p)));
+log.info(`Scoring sample: ${toScore.length} sent to the LLM, ${inScope.length - candidates.length} counted for volume only`);
 
 const runAt = new Date().toISOString();
-const rows = scored.map((p) => ({ ...p, mode, collectedAt: runAt }));
+// A rescore only appends the posts it newly scored; every other mode saves everything it collected.
+const rows = (mode === 'rescore' ? fresh.filter((p) => p.stance != null) : scored).map((p) => ({ ...p, mode, collectedAt: runAt }));
 await Actor.pushData(rows);
-const postsDataset = await Actor.openDataset(`${storeName}-posts`, { forceCloud: true });
 await postsDataset.pushData(rows);
 
 // ---------------------------------------------------------------------------
@@ -269,13 +305,15 @@ for (const [day, posts] of groupByDay(newNews)) {
 }
 for (const p of newNews) seenNews.add(p.id);
 
-if (mode === 'backfill' || mode === 'daily') {
+if (mode === 'backfill' || mode === 'daily' || mode === 'rescore') {
     // Social: a re-run for a day replaces that day's numbers (idempotent).
     for (const day of daysBetween(dateFrom, dateTo)) {
         baseline.days[day] ??= {};
-        for (const platform of ['x', 'linkedin', 'youtube', 'threads'] as const) {
+        for (const platform of SOCIAL) {
             const posts = (groups.get(platform) ?? []).filter((p) => utcDay(p.publishedAt) === day);
-            const isCapped = platform === 'x' ? !!capByDay[day] : !!capped[platform];
+            // A rescore didn't collect anything, so it keeps the cap flags of the run that did.
+            const isCapped =
+                mode === 'rescore' ? !!baseline.days[day][platform]?.capped : platform === 'x' ? !!capByDay[day] : !!capped[platform];
             baseline.days[day][platform] = aggregate(posts, isCapped);
         }
         baseline.days[day].news ??= emptyAgg();
