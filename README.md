@@ -20,7 +20,12 @@ Anthropic IPO Pulse is an orchestrator Actor that tracks how the internet talks 
 - **backfill**: collects every day from `dateFrom` to `dateTo` and writes them to the baseline. Run it once.
 - **daily**: collects yesterday. Schedule it at 00:15 UTC so LinkedIn's "newest first" results cover the day that just ended.
 - **news**: sweeps MarketWatch and Yahoo Finance news only. Schedule it every 2 hours, because the feeds keep only about a day of stories.
+- **rescore**: no scraping. Re-scores posts already saved in `<storeName>-posts` for the date range and rebuilds those days. Use it when a run hit its LLM budget.
 - **live**: snapshots the last `liveWindowMinutes` (default 15) for X and Threads, plus the news sweep and quotes. Schedule it every 15 minutes on IPO day. LinkedIn and YouTube stay daily-only.
+
+## Sentiment sampling
+
+The LLM scores up to `maxScoredPerPlatformDay` (default 300) posts per platform per UTC day: the most-engaged third, so the quote wall gets the strongest takes, plus an even spread of the rest. Volume counts every collected post; the relevant count is volume × the relevance rate of the scored sample. News is always scored in full.
 
 ## Output
 
