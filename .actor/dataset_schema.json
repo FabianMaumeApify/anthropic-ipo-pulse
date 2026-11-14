@@ -4,7 +4,7 @@
     "fields": {
         "type": "object",
         "properties": {
-            "platform": { "type": "string", "enum": ["x", "linkedin", "youtube", "news", "threads", "truth"] },
+            "platform": { "type": "string", "enum": ["x", "linkedin", "youtube", "news", "threads"] },
             "id": { "type": "string" },
             "url": { "type": "string" },
             "author": { "type": "string" },

@@ -7,7 +7,6 @@ import type { Post } from '../types.js';
 export const LINKEDIN_ACTOR = 'harvestapi/linkedin-post-search';
 export const YOUTUBE_ACTOR = 'streamers/youtube-scraper';
 export const THREADS_ACTOR = 'lergassy/threads-scraper';
-export const TRUTH_ACTOR = 'automation-lab/truth-social-scraper';
 
 interface ThreadsItem {
     type?: string;
@@ -21,19 +20,6 @@ interface ThreadsItem {
     replyCount?: number;
     repostCount?: number;
     quoteCount?: number;
-}
-
-interface TruthItem {
-    id?: string;
-    url?: string;
-    content?: string;
-    createdAt?: string;
-    authorUsername?: string;
-    authorUrl?: string;
-    isReblog?: boolean;
-    repliesCount?: number;
-    reblogsCount?: number;
-    favouritesCount?: number;
 }
 
 interface LinkedInItem {
@@ -79,10 +65,10 @@ async function settledCost(client: ExtendedApifyClient, runId: string): Promise<
     return Math.max(last, 0);
 }
 
-async function runChild<T>(
+export async function runChild<T>(
     client: ExtendedApifyClient,
     costs: CostTracker,
-    step: 'linkedin' | 'youtube' | 'threads' | 'truth',
+    step: 'x' | 'linkedin' | 'youtube' | 'threads',
     actor: string,
     input: Record<string, unknown>,
 ): Promise<{ items: T[]; runId: string; datasetId: string } | null> {
@@ -243,46 +229,3 @@ export async function collectThreads(
     };
 }
 
-/**
- * Truth Social has no logged-out search, so the Actor reads a watch list of profiles. Most posts are
- * not about Anthropic; the LLM relevance flag keeps only those that are.
- */
-export async function collectTruth(
-    client: ExtendedApifyClient,
-    costs: CostTracker,
-    profiles: string[],
-    opts: { maxPerProfile: number },
-): Promise<BatchResult> {
-    if (!profiles.length) return { posts: [], capped: false };
-    const res = await runChild<TruthItem>(client, costs, 'truth', TRUTH_ACTOR, {
-        mode: 'profile',
-        usernames: profiles.map((p) => p.replace(/^@/, '')),
-        maxPosts: opts.maxPerProfile,
-        includeReplies: false,
-        includeReblogs: false,
-    });
-    if (!res) return { posts: [], capped: true };
-    const posts: Post[] = [];
-    for (const i of res.items) {
-        // Image- or video-only posts have no text to score.
-        if (i.isReblog || !i.id || !i.url || !i.content?.trim() || !i.createdAt) continue;
-        posts.push({
-            platform: 'truth',
-            id: `ts_${i.id}`,
-            url: i.url,
-            author: i.authorUsername ? `@${i.authorUsername}` : 'Truth Social user',
-            authorUrl: i.authorUrl,
-            text: i.content.trim(),
-            publishedAt: new Date(i.createdAt).toISOString(),
-            engagement: (i.favouritesCount ?? 0) + (i.reblogsCount ?? 0) + (i.repliesCount ?? 0),
-            source: TRUTH_ACTOR,
-        });
-    }
-    log.info(`Truth Social: ${posts.length} text posts from ${profiles.length} profile(s)`);
-    return {
-        posts,
-        capped: false,
-        runId: res.runId,
-        datasetUrl: `https://console.apify.com/storage/datasets/${res.datasetId}`,
-    };
-}

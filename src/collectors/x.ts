@@ -1,91 +1,109 @@
 import { log } from 'apify';
+import type { ExtendedApifyClient } from 'apify-orchestrator';
 
-import { STANDBY_PRICES, type CostTracker } from '../costs.js';
-import { standby } from '../standby.js';
+import type { CostTracker } from '../costs.js';
 import type { Post } from '../types.js';
+import { runChild } from './social.js';
 
-export const X_ACTOR = 'apidojo/x-api';
+/**
+ * xquik/x-tweet-scraper: a batch-run (input interface) X search at $0.00015 per tweet that works on
+ * every Apify plan. apidojo/x-api (server interface) refuses accounts without a paid plan.
+ */
+export const X_ACTOR = 'xquik/x-tweet-scraper';
 
-interface XTweet {
-    id: string;
-    url: string;
-    fullText?: string;
+const FIELDS = ['id', 'url', 'text', 'createdAt', 'likeCount', 'retweetCount', 'replyCount', 'quoteCount', 'authorUsername', 'searchTerm'];
+
+interface XItem {
+    id?: string;
+    url?: string;
     text?: string;
-    createdAt: string;
+    createdAt?: string;
     likeCount?: number;
     retweetCount?: number;
     replyCount?: number;
     quoteCount?: number;
-    isRetweet?: boolean;
-    author?: { userName?: string; name?: string; url?: string };
+    authorUsername?: string;
+    searchTerm?: string;
 }
 
-interface XSearchResponse {
-    status: number;
-    data?: { tweets?: XTweet[]; cursor?: string };
-}
-
-function toPost(t: XTweet): Post {
+function toPost(t: XItem): Post | null {
+    if (!t.id || !t.url || !t.text || !t.createdAt) return null; // diagnostic rows have no tweet
+    const published = new Date(t.createdAt);
+    if (Number.isNaN(published.getTime())) return null;
     return {
         platform: 'x',
         id: `x_${t.id}`,
         url: t.url,
-        author: t.author?.userName ? `@${t.author.userName}` : (t.author?.name ?? 'unknown'),
-        authorUrl: t.author?.url,
-        text: (t.fullText ?? t.text ?? '').trim(),
-        publishedAt: new Date(t.createdAt).toISOString(),
+        author: t.authorUsername ? `@${t.authorUsername}` : 'unknown',
+        authorUrl: t.authorUsername ? `https://x.com/${t.authorUsername}` : undefined,
+        text: t.text.trim(),
+        publishedAt: published.toISOString(),
         engagement: (t.likeCount ?? 0) + (t.retweetCount ?? 0) + (t.replyCount ?? 0) + (t.quoteCount ?? 0),
         source: X_ACTOR,
     };
 }
 
-export interface XSearchArgs {
-    query: string;
-    sort: 'Latest' | 'Top';
-    maxPages: number;
-    /** Stop paging once tweets get older than this (Latest only). */
-    stopBefore?: Date;
-    costs: CostTracker;
-}
+const unix = (d: Date) => Math.floor(d.getTime() / 1000);
 
-/** Pages through X search. Returns posts and whether the page limit cut collection short. */
-export async function searchX({ query, sort, maxPages, stopBefore, costs }: XSearchArgs) {
-    const posts: Post[] = [];
-    let cursor: string | undefined;
-    let capped = false;
-    for (let page = 0; page < maxPages; page++) {
-        if (!costs.canSpend('x', STANDBY_PRICES.xRequest)) {
-            capped = true;
-            break;
+/**
+ * Whole UTC days, each split into time slices so the sample covers the full day instead of only
+ * its last hours (X search returns newest first). One child run covers every day in the range.
+ */
+export async function collectXDays(
+    client: ExtendedApifyClient,
+    costs: CostTracker,
+    baseQuery: string,
+    days: string[],
+    opts: { perDay: number; slicesPerDay?: number },
+) {
+    const slices = opts.slicesPerDay ?? 4;
+    const perSlice = Math.max(10, Math.ceil(opts.perDay / slices));
+    const termDay = new Map<string, string>();
+    for (const day of days) {
+        const start = new Date(`${day}T00:00:00Z`).getTime();
+        for (let s = 0; s < slices; s++) {
+            const from = new Date(start + (s * 86_400_000) / slices);
+            const to = new Date(start + ((s + 1) * 86_400_000) / slices);
+            termDay.set(`${baseQuery} since_time:${unix(from)} until_time:${unix(to)}`, day);
         }
-        const res = await standby<XSearchResponse>(X_ACTOR, '/search', { query: { query, sort, cursor } });
-        costs.add('x', STANDBY_PRICES.xRequest);
-        const tweets = res.data?.tweets ?? [];
-        for (const t of tweets) if (!t.isRetweet) posts.push(toPost(t));
-        cursor = res.data?.cursor;
-        const oldest = tweets.length ? new Date(tweets[tweets.length - 1].createdAt) : undefined;
-        if (!tweets.length || !cursor) break;
-        if (stopBefore && oldest && oldest < stopBefore) break;
-        if (page === maxPages - 1) capped = true;
     }
-    log.info(`X "${query}" (${sort}): ${posts.length} tweets${capped ? ' (page cap hit)' : ''}`);
-    return { posts, capped };
+    const terms = [...termDay.keys()];
+    const res = await runChild<XItem>(client, costs, 'x', X_ACTOR, {
+        searchTerms: terms,
+        queryType: 'Latest',
+        maxItemsPerTarget: perSlice,
+        maxItems: terms.length * perSlice,
+        includeSearchTerms: true,
+        fields: FIELDS,
+    });
+    if (!res) return { posts: [] as Post[], cappedByDay: Object.fromEntries(days.map((d) => [d, true])) };
+
+    const perTerm = new Map<string, number>();
+    const posts: Post[] = [];
+    for (const item of res.items) {
+        const post = toPost(item);
+        if (!post) continue;
+        posts.push(post);
+        if (item.searchTerm) perTerm.set(item.searchTerm, (perTerm.get(item.searchTerm) ?? 0) + 1);
+    }
+    // A day is a floor (not a full count) when any of its slices hit the per-slice cap.
+    const cappedByDay: Record<string, boolean> = {};
+    for (const [term, day] of termDay) cappedByDay[day] ||= (perTerm.get(term) ?? 0) >= perSlice;
+    log.info(`X: ${posts.length} tweets over ${days.length} day(s) (${perSlice} max per ${24 / slices}h slice)`);
+    return { posts, cappedByDay, datasetUrl: `https://console.apify.com/storage/datasets/${res.datasetId}` };
 }
 
-/** One UTC day: Latest pages for volume + one Top page so high-engagement posts are present. */
-export async function collectXDay(baseQuery: string, day: string, maxPages: number, costs: CostTracker) {
-    const next = new Date(`${day}T00:00:00Z`);
-    next.setUTCDate(next.getUTCDate() + 1);
-    const q = `${baseQuery} since:${day} until:${next.toISOString().slice(0, 10)}`;
-    const latest = await searchX({ query: q, sort: 'Latest', maxPages, costs });
-    const top = await searchX({ query: q, sort: 'Top', maxPages: 1, costs });
-    return { posts: [...latest.posts, ...top.posts], capped: latest.capped };
-}
-
-/** Live window: Latest tweets from the last `minutes`. */
-export async function collectXLive(baseQuery: string, minutes: number, maxPages: number, costs: CostTracker) {
+/** Live window: every tweet from the last `minutes`, up to `max`. */
+export async function collectXLive(client: ExtendedApifyClient, costs: CostTracker, baseQuery: string, minutes: number, max: number) {
     const since = new Date(Date.now() - minutes * 60_000);
-    const q = `${baseQuery} since:${since.toISOString().slice(0, 10)}`;
-    const { posts, capped } = await searchX({ query: q, sort: 'Latest', maxPages, stopBefore: since, costs });
-    return { posts: posts.filter((p) => new Date(p.publishedAt) >= since), capped };
+    const res = await runChild<XItem>(client, costs, 'x', X_ACTOR, {
+        searchTerms: [`${baseQuery} since_time:${unix(since)}`],
+        queryType: 'Latest',
+        maxItems: max,
+        fields: FIELDS,
+    });
+    if (!res) return { posts: [] as Post[], capped: true };
+    const posts = res.items.map(toPost).filter((p): p is Post => !!p && new Date(p.publishedAt) >= since);
+    log.info(`X live: ${posts.length} tweets in the last ${minutes} min`);
+    return { posts, capped: posts.length >= max };
 }

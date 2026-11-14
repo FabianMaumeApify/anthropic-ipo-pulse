@@ -7,10 +7,20 @@
         "mode": {
             "title": "Mode",
             "type": "string",
-            "description": "backfill: rebuild the baseline for a date range. daily: add yesterday to the baseline (schedule once a day). news: sweep MarketWatch and Yahoo news only (schedule every 2 hours, the feeds are rolling windows). live: D-day snapshot of the last N minutes across every platform (schedule every 10 minutes).",
+            "description": "backfill: rebuild the baseline for a date range. daily: add yesterday to the baseline (schedule once a day, just after midnight UTC). news: sweep MarketWatch and Yahoo news only (schedule every 2 hours, the feeds are rolling windows). live: D-day snapshot of the last N minutes for X, Threads, news and quotes (schedule every 15 minutes).",
             "editor": "select",
-            "enum": ["backfill", "daily", "news", "live"],
-            "enumTitles": ["Backfill a date range", "Daily baseline update", "News sweep", "Live (D-day)"],
+            "enum": [
+                "backfill",
+                "daily",
+                "news",
+                "live"
+            ],
+            "enumTitles": [
+                "Backfill a date range",
+                "Daily baseline update",
+                "News sweep",
+                "Live (D-day)"
+            ],
             "default": "daily"
         },
         "dateFrom": {
@@ -29,16 +39,20 @@
         "xQuery": {
             "title": "X search query",
             "type": "string",
-            "description": "One X advanced-search query. The Actor adds since:/until: per day.",
+            "description": "One X advanced-search query for xquik/x-tweet-scraper. The Actor adds since_time:/until_time: per time slice.",
             "editor": "textfield",
             "default": "Anthropic (IPO OR stock OR shares OR valuation OR $ANT) -filter:retweets"
         },
         "searchQueries": {
-            "title": "LinkedIn and YouTube search terms",
+            "title": "LinkedIn, YouTube and Threads search terms",
             "type": "array",
-            "description": "Search terms passed to the LinkedIn and YouTube Actors.",
+            "description": "Search terms passed to the LinkedIn, YouTube and Threads Actors.",
             "editor": "stringList",
-            "default": ["Anthropic IPO", "Anthropic stock", "Anthropic valuation"]
+            "default": [
+                "Anthropic IPO",
+                "Anthropic stock",
+                "Anthropic valuation"
+            ]
         },
         "liveTicker": {
             "title": "Main ticker",
@@ -52,7 +66,13 @@
             "type": "array",
             "description": "Quoted next to the main ticker and used to find Anthropic stories on Yahoo Finance.",
             "editor": "stringList",
-            "default": ["AMZN", "GOOGL", "NVDA", "MSFT", "QQQ"]
+            "default": [
+                "AMZN",
+                "GOOGL",
+                "NVDA",
+                "MSFT",
+                "QQQ"
+            ]
         },
         "llmModel": {
             "title": "Sentiment model (OpenRouter)",
@@ -61,13 +81,19 @@
             "editor": "textfield",
             "default": "google/gemini-2.5-flash"
         },
-        "maxXPagesPerDay": {
-            "title": "Max X pages per day",
+        "maxXTweetsPerDay": {
+            "title": "Max X tweets per day",
             "type": "integer",
-            "description": "About 20 tweets per page at $0.004 per page. When the limit is hit, that day's X volume is flagged as a floor.",
-            "minimum": 1,
-            "maximum": 100,
-            "default": 10
+            "description": "Backfill and daily mode. Each day is split into four 6-hour slices so the sample covers the whole day. About $0.15 per 1,000 tweets. When a slice hits its share, that day is flagged as a floor.",
+            "minimum": 40,
+            "default": 1000
+        },
+        "maxXTweetsLive": {
+            "title": "Max X tweets per live snapshot",
+            "type": "integer",
+            "description": "Live mode: every tweet from the live window, up to this many.",
+            "minimum": 20,
+            "default": 500
         },
         "maxLinkedInPostsPerQuery": {
             "title": "Max LinkedIn posts per query per day",
@@ -90,27 +116,20 @@
             "minimum": 1,
             "default": 30
         },
-        "truthProfiles": {
-            "title": "Truth Social profiles to watch",
-            "type": "array",
-            "description": "Truth Social has no logged-out search, so these accounts are read and the LLM keeps only posts about Anthropic or the IPO. Usernames without @.",
-            "editor": "stringList",
-            "default": ["realDonaldTrump", "DonaldJTrumpJr", "JDVance", "DevinNunes"]
-        },
-        "maxTruthPostsPerProfile": {
-            "title": "Max Truth Social posts per profile per day",
+        "maxThreadsPostsLive": {
+            "title": "Max Threads posts per query per live snapshot",
             "type": "integer",
-            "description": "About $0.002 per post (automation-lab/truth-social-scraper). Multiplied by the number of days in the range (up to 5).",
+            "description": "Live mode. Threads shows logged-out visitors 20 to 60 posts per keyword, so a small number is enough.",
             "minimum": 1,
-            "default": 30
+            "default": 20
         },
         "liveWindowMinutes": {
             "title": "Live window (minutes)",
             "type": "integer",
-            "description": "In live mode, how far back the snapshot looks.",
+            "description": "In live mode, how far back the snapshot looks. Keep it equal to the schedule interval (15 min) so snapshots do not overlap.",
             "minimum": 10,
             "maximum": 1440,
-            "default": 60
+            "default": 15
         },
         "storeName": {
             "title": "Storage name",

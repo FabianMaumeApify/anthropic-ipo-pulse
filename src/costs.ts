@@ -5,7 +5,6 @@ import { log } from 'apify';
  * from each Actor's published BRONZE-tier event price. Batch Runs report their real cost.
  */
 export const STANDBY_PRICES = {
-    xRequest: 0.004, // apidojo/x-api, per API request
     financeRecord: 0.0015, // publicmoney/* "Record" event
     newsItem: 0.00075, // publicmoney/* "News item" event
     yahooQuote: 0, // publicmoney/yahoo-finance-scraper is free
