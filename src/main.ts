@@ -34,7 +34,8 @@ await Actor.init();
 
 const input = (await Actor.getInput<Input>()) ?? {};
 const mode: Mode = input.mode ?? 'daily';
-const xQuery = input.xQuery ?? '("Anthropic IPO" OR "$ANT" OR "Anthropic stock" OR "Anthropic valuation" OR "Anthropic shares") -filter:retweets';
+// Requiring "Anthropic" keeps X from loosely matching $ANT to any "ant" (measured: ~60% noise otherwise).
+const xQuery = input.xQuery ?? 'Anthropic (IPO OR stock OR shares OR valuation OR $ANT) -filter:retweets';
 const searchQueries = input.searchQueries ?? ['Anthropic IPO', 'Anthropic stock', 'Anthropic valuation'];
 const liveTicker = (input.liveTicker ?? 'ANT').toUpperCase();
 const peers = (input.peerTickers ?? ['AMZN', 'GOOGL', 'NVDA', 'MSFT', 'QQQ']).map((s) => s.toUpperCase());

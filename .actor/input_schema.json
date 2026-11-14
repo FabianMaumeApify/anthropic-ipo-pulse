@@ -31,7 +31,7 @@
             "type": "string",
             "description": "One X advanced-search query. The Actor adds since:/until: per day.",
             "editor": "textfield",
-            "default": "(\"Anthropic IPO\" OR \"$ANT\" OR \"Anthropic stock\" OR \"Anthropic valuation\" OR \"Anthropic shares\") -filter:retweets"
+            "default": "Anthropic (IPO OR stock OR shares OR valuation OR $ANT) -filter:retweets"
         },
         "searchQueries": {
             "title": "LinkedIn and YouTube search terms",
