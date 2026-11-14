@@ -9,6 +9,8 @@ Anthropic IPO Pulse is an orchestrator Actor that tracks how the internet talks 
 | X search, day by day or the last hour | [apidojo/x-api](https://apify.com/apidojo/x-api) | Standby HTTP |
 | LinkedIn posts | [harvestapi/linkedin-post-search](https://apify.com/harvestapi/linkedin-post-search) | Actor run |
 | YouTube videos | [streamers/youtube-scraper](https://apify.com/streamers/youtube-scraper) | Actor run |
+| Threads posts (keyword search) | [lergassy/threads-scraper](https://apify.com/lergassy/threads-scraper) | Actor run |
+| Truth Social posts (watch list of profiles) | [automation-lab/truth-social-scraper](https://apify.com/automation-lab/truth-social-scraper) | Actor run |
 | Stock news | [publicmoney/marketwatch-scraper](https://apify.com/publicmoney/marketwatch-scraper), [publicmoney/yahoo-finance-scraper](https://apify.com/publicmoney/yahoo-finance-scraper) (news mode) | Standby HTTP |
 | Quotes | [publicmoney/yahoo-finance-scraper](https://apify.com/publicmoney/yahoo-finance-scraper), [publicmoney/nasdaq-scraper](https://apify.com/publicmoney/nasdaq-scraper) | Standby HTTP |
 | Ticker news sentiment | [publicmoney/sentiment-mini](https://apify.com/publicmoney/sentiment-mini) | Standby HTTP |
@@ -34,7 +36,7 @@ Every scored post goes to the run's dataset and to the named dataset `<storeName
 
 ## Cost control
 
-Set **Max total charge (USD)** on the run. The budget is split evenly across the six steps (X, LinkedIn, YouTube, news, markets, LLM). Each batch Actor run gets its share as `maxTotalChargeUsd`, and each Standby step stops once its estimated spend reaches its share. A daily run with default settings costs about $0.30–0.60.
+Set **Max total charge (USD)** on the run. The budget is split evenly across the eight steps (X, LinkedIn, YouTube, Threads, Truth Social, news, markets, LLM). Each batch Actor run gets its share as `maxTotalChargeUsd`, and each Standby step stops once its estimated spend reaches its share. A daily run with default settings costs about $0.80–1.20, so give it a cap of about $3: the even split leaves each step about $0.37, enough for LinkedIn's roughly $0.30.
 
 ## Requirements
 

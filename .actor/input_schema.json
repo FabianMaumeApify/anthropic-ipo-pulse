@@ -83,6 +83,27 @@
             "minimum": 1,
             "default": 25
         },
+        "maxThreadsPostsPerQuery": {
+            "title": "Max Threads posts per query per day",
+            "type": "integer",
+            "description": "Threads keyword search (lergassy/threads-scraper), about $0.0018 per post. Multiplied by the number of days in the range (up to 4).",
+            "minimum": 1,
+            "default": 30
+        },
+        "truthProfiles": {
+            "title": "Truth Social profiles to watch",
+            "type": "array",
+            "description": "Truth Social has no logged-out search, so these accounts are read and the LLM keeps only posts about Anthropic or the IPO. Usernames without @.",
+            "editor": "stringList",
+            "default": ["realDonaldTrump", "DonaldJTrumpJr", "JDVance", "DevinNunes"]
+        },
+        "maxTruthPostsPerProfile": {
+            "title": "Max Truth Social posts per profile per day",
+            "type": "integer",
+            "description": "About $0.002 per post (automation-lab/truth-social-scraper). Multiplied by the number of days in the range (up to 5).",
+            "minimum": 1,
+            "default": 30
+        },
         "liveWindowMinutes": {
             "title": "Live window (minutes)",
             "type": "integer",

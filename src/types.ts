@@ -1,5 +1,5 @@
-export type Platform = 'x' | 'linkedin' | 'youtube' | 'news';
-export const PLATFORMS: Platform[] = ['x', 'linkedin', 'youtube', 'news'];
+export type Platform = 'x' | 'linkedin' | 'youtube' | 'news' | 'threads' | 'truth';
+export const PLATFORMS: Platform[] = ['x', 'linkedin', 'youtube', 'news', 'threads', 'truth'];
 
 export type Mode = 'backfill' | 'daily' | 'news' | 'live';
 

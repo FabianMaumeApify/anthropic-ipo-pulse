@@ -4,7 +4,16 @@ import { Orchestrator, type ExtendedApifyClient } from 'apify-orchestrator';
 import { aggregate, byPlatform, emptyAgg, forDisplay, groupByDay, mergeAgg, utcDay } from './aggregate.js';
 import { collectQuotes, collectTickerSentiment, NASDAQ_ACTOR, SENTIMENT_ACTOR, YAHOO_ACTOR } from './collectors/markets.js';
 import { collectNews, MARKETWATCH_ACTOR } from './collectors/news.js';
-import { collectLinkedIn, collectYouTube, LINKEDIN_ACTOR, YOUTUBE_ACTOR } from './collectors/social.js';
+import {
+    collectLinkedIn,
+    collectThreads,
+    collectTruth,
+    collectYouTube,
+    LINKEDIN_ACTOR,
+    THREADS_ACTOR,
+    TRUTH_ACTOR,
+    YOUTUBE_ACTOR,
+} from './collectors/social.js';
 import { collectXDay, collectXLive, X_ACTOR } from './collectors/x.js';
 import { CostTracker } from './costs.js';
 import { OPENROUTER_ACTOR, scorePosts } from './score.js';
@@ -23,12 +32,15 @@ interface Input {
     maxXPagesPerDay?: number;
     maxLinkedInPostsPerQuery?: number;
     maxYouTubeVideosPerQuery?: number;
+    maxThreadsPostsPerQuery?: number;
+    truthProfiles?: string[];
+    maxTruthPostsPerProfile?: number;
     liveWindowMinutes?: number;
     storeName?: string;
 }
 
 // Every step that spends money. The run's maxTotalChargeUsd is split evenly across them.
-const STEPS = ['x', 'linkedin', 'youtube', 'news', 'markets', 'llm'] as const;
+const STEPS = ['x', 'linkedin', 'youtube', 'threads', 'truth', 'news', 'markets', 'llm'] as const;
 
 await Actor.init();
 
@@ -43,6 +55,10 @@ const llmModel = input.llmModel ?? 'google/gemini-2.5-flash';
 const maxXPagesPerDay = input.maxXPagesPerDay ?? 10;
 const maxLinkedIn = input.maxLinkedInPostsPerQuery ?? 50;
 const maxYouTube = input.maxYouTubeVideosPerQuery ?? 25;
+const maxThreads = input.maxThreadsPostsPerQuery ?? 30;
+// Truth Social cannot be searched without a login, so it reads a watch list of market-moving accounts.
+const truthProfiles = input.truthProfiles ?? ['realDonaldTrump', 'DonaldJTrumpJr', 'JDVance', 'DevinNunes'];
+const maxTruthPerProfile = input.maxTruthPostsPerProfile ?? 30;
 const liveWindow = input.liveWindowMinutes ?? 60;
 const storeName = input.storeName ?? 'anthropic-ipo';
 
@@ -158,6 +174,37 @@ if (mode === 'backfill' || mode === 'daily') {
             [],
         ),
     );
+    tasks.push(
+        safe(
+            'Threads',
+            async () => {
+                const until = utcDay(new Date(new Date(`${dateTo}T00:00:00Z`).getTime() + 86_400_000).toISOString());
+                const r = await collectThreads(client, costs, searchQueries, {
+                    since: dateFrom,
+                    until,
+                    maxPerQuery: maxThreads * Math.min(days.length, 4),
+                });
+                capped.threads = r.capped;
+                if (r.datasetUrl) subDatasets.push({ name: THREADS_ACTOR, resultUrl: r.datasetUrl });
+                return r.posts;
+            },
+            [],
+        ),
+    );
+    tasks.push(
+        safe(
+            'Truth Social',
+            async () => {
+                // Busy accounts post 10+ times a day, so read further back on multi-day backfills.
+                const r = await collectTruth(client, costs, truthProfiles, {
+                    maxPerProfile: maxTruthPerProfile * Math.min(days.length, 5),
+                });
+                if (r.datasetUrl) subDatasets.push({ name: TRUTH_ACTOR, resultUrl: r.datasetUrl });
+                return r.posts;
+            },
+            [],
+        ),
+    );
 }
 
 if (mode === 'live') {
@@ -249,7 +296,7 @@ if (mode === 'backfill' || mode === 'daily') {
     // Social: a re-run for a day replaces that day's numbers (idempotent).
     for (const day of daysBetween(dateFrom, dateTo)) {
         baseline.days[day] ??= {};
-        for (const platform of ['x', 'linkedin', 'youtube'] as const) {
+        for (const platform of ['x', 'linkedin', 'youtube', 'threads', 'truth'] as const) {
             const posts = (groups.get(platform) ?? []).filter((p) => utcDay(p.publishedAt) === day);
             const isCapped = platform === 'x' ? !!capByDay[day] : !!capped[platform];
             baseline.days[day][platform] = aggregate(posts, isCapped);
@@ -283,12 +330,13 @@ await store.setMeta({
     lastRun: { mode, runId, at: runAt, dateFrom, dateTo },
     xQuery,
     searchQueries,
+    truthProfiles,
     liveTicker,
     peers,
     llmModel,
     actors: {
         server: [YAHOO_ACTOR, NASDAQ_ACTOR, MARKETWATCH_ACTOR, SENTIMENT_ACTOR, X_ACTOR, OPENROUTER_ACTOR],
-        input: [LINKEDIN_ACTOR, YOUTUBE_ACTOR],
+        input: [LINKEDIN_ACTOR, YOUTUBE_ACTOR, THREADS_ACTOR, TRUTH_ACTOR],
     },
 });
 await Actor.setValue('SUB_DATASETS', subDatasets);
