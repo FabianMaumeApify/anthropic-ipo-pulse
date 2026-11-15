@@ -44,4 +44,8 @@ Set **Max total charge (USD)** on the run. The budget is split evenly across the
 
 ## Requirements
 
-The account must be able to use `apify/openrouter`, which needs a paid plan. If scoring fails, posts are still counted for volume but carry no sentiment.
+The account must be able to use `apify/openrouter` (it works on the free plan). If scoring fails, posts are still counted for volume but carry no sentiment.
+
+## License
+
+[MIT](LICENSE)

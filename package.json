@@ -36,5 +36,5 @@
         "test": "vitest run"
     },
     "author": "Apify",
-    "license": "ISC"
+    "license": "MIT"
 }
