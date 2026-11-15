@@ -12,3 +12,6 @@ tsconfig.tsbuildinfo
 
 # Added by Apify CLI
 .venv
+
+# Local npm config (may hold a registry token)
+.npmrc
