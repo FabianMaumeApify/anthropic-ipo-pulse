@@ -7,6 +7,7 @@ import type { Post } from '../types.js';
 export const LINKEDIN_ACTOR = 'harvestapi/linkedin-post-search';
 export const YOUTUBE_ACTOR = 'streamers/youtube-scraper';
 export const THREADS_ACTOR = 'lergassy/threads-scraper';
+export const REDDIT_ACTOR = 'harshmaur/reddit-scraper';
 
 interface ThreadsItem {
     type?: string;
@@ -68,7 +69,7 @@ async function settledCost(client: ExtendedApifyClient, runId: string): Promise<
 export async function runChild<T>(
     client: ExtendedApifyClient,
     costs: CostTracker,
-    step: 'x' | 'linkedin' | 'youtube' | 'threads',
+    step: 'x' | 'linkedin' | 'youtube' | 'threads' | 'reddit',
     actor: string,
     input: Record<string, unknown>,
 ): Promise<{ items: T[]; runId: string; datasetId: string } | null> {
@@ -221,6 +222,67 @@ export async function collectThreads(
         });
     }
     log.info(`Threads: ${posts.length} posts`);
+    return {
+        posts,
+        capped: posts.length >= queries.length * opts.maxPerQuery,
+        runId: res.runId,
+        datasetUrl: `https://console.apify.com/storage/datasets/${res.datasetId}`,
+    };
+}
+
+interface RedditItem {
+    id?: string;
+    postUrl?: string;
+    url?: string;
+    title?: string;
+    body?: string;
+    authorName?: string;
+    authorUrl?: string;
+    createdAt?: string;
+    score?: number;
+    upVotes?: number;
+    commentsCount?: number;
+    communityName?: string;
+}
+
+export async function collectReddit(
+    client: ExtendedApifyClient,
+    costs: CostTracker,
+    queries: string[],
+    opts: { postedAfter?: string; maxPerQuery: number },
+): Promise<BatchResult> {
+    const input: Record<string, unknown> = {
+        searchTerms: queries,
+        searchPosts: true,
+        searchComments: false,
+        searchSort: 'new',
+        searchTime: 'all',
+        maxPostsCount: opts.maxPerQuery,
+        includeNSFW: false,
+    };
+    if (opts.postedAfter) input.postedAfter = opts.postedAfter;
+
+    const res = await runChild<RedditItem>(client, costs, 'reddit', REDDIT_ACTOR, input);
+    if (!res) return { posts: [], capped: true };
+    const posts: Post[] = [];
+    for (const i of res.items) {
+        const postUrl = i.postUrl ?? i.url;
+        if (!i.id || !postUrl || !i.createdAt) continue;
+        const text = [i.title, i.body].filter(Boolean).join('\n').slice(0, 600).trim();
+        if (!text) continue;
+        posts.push({
+            platform: 'reddit',
+            id: `rd_${i.id}`,
+            url: postUrl,
+            author: i.authorName ? `u/${i.authorName}` : 'Reddit user',
+            authorUrl: i.authorUrl,
+            text,
+            publishedAt: new Date(i.createdAt).toISOString(),
+            engagement: (i.score ?? i.upVotes ?? 0) + (i.commentsCount ?? 0),
+            source: REDDIT_ACTOR,
+        });
+    }
+    log.info(`Reddit: ${posts.length} posts`);
     return {
         posts,
         capped: posts.length >= queries.length * opts.maxPerQuery,

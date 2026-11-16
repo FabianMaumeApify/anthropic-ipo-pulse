@@ -4,7 +4,7 @@ import { Orchestrator, type ExtendedApifyClient } from 'apify-orchestrator';
 import { aggregate, byPlatform, emptyAgg, forDisplay, groupByDay, mergeAgg, pickForScoring, utcDay } from './aggregate.js';
 import { collectQuotes, collectTickerSentiment, NASDAQ_ACTOR, SENTIMENT_ACTOR, YAHOO_ACTOR } from './collectors/markets.js';
 import { collectNews, MARKETWATCH_ACTOR } from './collectors/news.js';
-import { collectLinkedIn, collectThreads, collectYouTube, LINKEDIN_ACTOR, THREADS_ACTOR, YOUTUBE_ACTOR } from './collectors/social.js';
+import { collectLinkedIn, collectReddit, collectThreads, collectYouTube, LINKEDIN_ACTOR, REDDIT_ACTOR, THREADS_ACTOR, YOUTUBE_ACTOR } from './collectors/social.js';
 import { collectXDays, collectXLive, X_ACTOR } from './collectors/x.js';
 import { CostTracker } from './costs.js';
 import { OPENROUTER_ACTOR, scorePosts } from './score.js';
@@ -26,13 +26,15 @@ interface Input {
     maxYouTubeVideosPerQuery?: number;
     maxThreadsPostsPerQuery?: number;
     maxThreadsPostsLive?: number;
+    maxRedditPostsPerQuery?: number;
+    maxRedditPostsLive?: number;
     maxScoredPerPlatformDay?: number;
     liveWindowMinutes?: number;
     storeName?: string;
 }
 
 // Every step that spends money. The run's maxTotalChargeUsd is split evenly across them.
-const STEPS = ['x', 'linkedin', 'youtube', 'threads', 'news', 'markets', 'llm'] as const;
+const STEPS = ['x', 'linkedin', 'youtube', 'threads', 'reddit', 'news', 'markets', 'llm'] as const;
 
 await Actor.init();
 
@@ -50,9 +52,11 @@ const maxLinkedIn = input.maxLinkedInPostsPerQuery ?? 50;
 const maxYouTube = input.maxYouTubeVideosPerQuery ?? 25;
 const maxThreads = input.maxThreadsPostsPerQuery ?? 30;
 const maxThreadsLive = input.maxThreadsPostsLive ?? 20;
+const maxReddit = input.maxRedditPostsPerQuery ?? 50;
+const maxRedditLive = input.maxRedditPostsLive ?? 30;
 // LLM sample per platform per UTC day; volume still counts every collected post.
 const scoreCap = input.maxScoredPerPlatformDay ?? 300;
-const SOCIAL = ['x', 'linkedin', 'youtube', 'threads'] as const;
+const SOCIAL = ['x', 'linkedin', 'youtube', 'threads', 'reddit'] as const;
 // Matches the D-day schedule (every 15 min), so consecutive snapshots don't overlap.
 const liveWindow = input.liveWindowMinutes ?? 15;
 const storeName = input.storeName ?? 'anthropic-ipo';
@@ -183,6 +187,21 @@ if (mode === 'backfill' || mode === 'daily') {
             [],
         ),
     );
+    tasks.push(
+        safe(
+            'Reddit',
+            async () => {
+                const r = await collectReddit(client, costs, searchQueries, {
+                    postedAfter: dateFrom,
+                    maxPerQuery: maxReddit * Math.min(days.length, 4),
+                });
+                capped.reddit = r.capped;
+                if (r.datasetUrl) subDatasets.push({ name: REDDIT_ACTOR, resultUrl: r.datasetUrl });
+                return r.posts;
+            },
+            [],
+        ),
+    );
 }
 
 // D-day snapshot: the two fast-moving platforms only (LinkedIn and YouTube stay daily).
@@ -209,6 +228,20 @@ if (mode === 'live') {
                     maxPerQuery: maxThreadsLive,
                 });
                 capped.threads = r.capped;
+                return r.posts;
+            },
+            [],
+        ),
+    );
+    tasks.push(
+        safe(
+            'Reddit live',
+            async () => {
+                const r = await collectReddit(client, costs, searchQueries, {
+                    postedAfter: today,
+                    maxPerQuery: maxRedditLive,
+                });
+                capped.reddit = r.capped;
                 return r.posts;
             },
             [],
@@ -327,7 +360,7 @@ await store.saveSeenNews(seenNews);
 
 if (mode === 'live') {
     const platforms: LiveSnapshot['platforms'] = {};
-    for (const platform of ['x', 'threads', 'news'] as const) {
+    for (const platform of ['x', 'threads', 'reddit', 'news'] as const) {
         const posts = (groups.get(platform) ?? []).filter((p) => new Date(p.publishedAt) >= windowStart);
         platforms[platform] = forDisplay(aggregate(posts, !!capped[platform]));
     }
@@ -351,7 +384,7 @@ await store.setMeta({
     liveWindowMinutes: liveWindow,
     actors: {
         server: [YAHOO_ACTOR, NASDAQ_ACTOR, MARKETWATCH_ACTOR, SENTIMENT_ACTOR, OPENROUTER_ACTOR],
-        input: [X_ACTOR, LINKEDIN_ACTOR, YOUTUBE_ACTOR, THREADS_ACTOR],
+        input: [X_ACTOR, LINKEDIN_ACTOR, YOUTUBE_ACTOR, THREADS_ACTOR, REDDIT_ACTOR],
     },
 });
 await Actor.setValue('SUB_DATASETS', subDatasets);
