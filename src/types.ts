@@ -17,12 +17,22 @@ export interface Post {
 
 export type Stance = 'bull' | 'bear' | 'neutral';
 
+/** What a post is about. The website groups sentiment by these keys, so keep them stable. */
+export type Topic = 'valuation' | 'bubble' | 'governance' | 'safety' | 'access' | 'rivals' | 'business' | 'insiders' | 'macro' | 'other';
+export const TOPICS: Topic[] = ['valuation', 'bubble', 'governance', 'safety', 'access', 'rivals', 'business', 'insiders', 'macro', 'other'];
+
+export const isTopic = (v: unknown): v is Topic => typeof v === 'string' && (TOPICS as string[]).includes(v);
+
 export interface ScoredPost extends Post {
     relevant: boolean;
     score: number | null; // -1 .. 1
     stance: Stance | null;
     extremeness: number | null; // 0 .. 1
+    topic: Topic | null; // null when unscored or judged irrelevant; posts scored before themes existed lack the field
 }
+
+/** Per topic: judged relevant posts with a score, and the sum of their scores. */
+export type TopicTally = Partial<Record<Topic, { n: number; sentimentSum: number }>>;
 
 export interface QuoteCard {
     platform: Platform;
@@ -49,6 +59,9 @@ export interface Agg {
     capped: boolean; // true when collection hit a page/item limit (volume is a floor)
     topBull: QuoteCard[];
     topBear: QuoteCard[];
+    topics?: TopicTally;
+    extremeBull?: number; // judged relevant posts with extremeness >= 0.7 and stance bull
+    extremeBear?: number; // same, stance bear
     updatedAt: string;
 }
 
@@ -76,11 +89,21 @@ export interface TickerSentiment {
     asOf: string;
 }
 
+/** One of a day's main narratives, written by the LLM from that day's most-engaged posts. */
+export interface Storyline {
+    title: string;
+    summary: string;
+    stance: Stance;
+    topic: Topic;
+    urls: string[]; // 1-4 source post urls, always from the posts the LLM was given
+}
+
 export interface Baseline {
     updatedAt: string;
     days: Record<string, Partial<Record<Platform, Agg>>>; // key: YYYY-MM-DD (UTC)
     quotes: Record<string, TickerQuote[]>; // daily snapshot of peer/ANT quotes
     tickerSentiment: Record<string, TickerSentiment[]>; // daily sentiment-mini snapshot
+    storylines?: Record<string, Storyline[]>; // key: YYYY-MM-DD (UTC), up to 3 per day
 }
 
 export interface LiveSnapshot {

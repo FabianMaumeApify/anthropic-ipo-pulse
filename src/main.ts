@@ -9,6 +9,7 @@ import { collectXDays, collectXLive, X_ACTOR } from './collectors/x.js';
 import { CostTracker } from './costs.js';
 import { OPENROUTER_ACTOR, scorePosts } from './score.js';
 import { TrackerStore } from './store.js';
+import { storylinesForDays } from './storylines.js';
 import type { LiveSnapshot, Mode, Platform, Post, ScoredPost } from './types.js';
 
 interface Input {
@@ -258,6 +259,11 @@ if (mode === 'rescore') {
             'Load saved posts',
             async () => {
                 const best = new Map<string, ScoredPost>();
+                // Prefer a judged row, and among judged rows one scored after themes existed (it has a topic field).
+                const quality = (r: ScoredPost) => {
+                    if (r.stance == null) return 0;
+                    return r.topic === undefined ? 1 : 2;
+                };
                 for (let offset = 0; ; offset += 1000) {
                     const page = await postsDataset.getData({ offset, limit: 1000 });
                     for (const row of page.items as unknown as ScoredPost[]) {
@@ -265,7 +271,7 @@ if (mode === 'rescore') {
                         const d = utcDay(row.publishedAt);
                         if (d < dateFrom || d > dateTo) continue;
                         const prev = best.get(row.id);
-                        if (!prev || (prev.stance == null && row.stance != null)) best.set(row.id, row);
+                        if (!prev || quality(row) > quality(prev)) best.set(row.id, row);
                     }
                     if (page.items.length < 1000) break;
                 }
@@ -310,17 +316,20 @@ log.info(`Collected ${collected.length} items, ${unique.length} unique, ${inScop
 //    (up to scoreCap posts per platform per day; news is always scored in full)
 // ---------------------------------------------------------------------------
 const alreadyJudged = (p: Post) => (p as ScoredPost).stance != null;
+// Posts judged before themes existed have no topic field, so a rescore sends them again to get one.
+const needsScoring = (p: Post) => !alreadyJudged(p) || (p as ScoredPost).topic === undefined;
 const candidates = [...inScope.filter((p) => p.platform === 'news'), ...pickForScoring(inScope.filter((p) => p.platform !== 'news'), scoreCap)];
-const toScore = candidates.filter((p) => !alreadyJudged(p));
-const fresh = await scorePosts(toScore, { model: llmModel, costs });
+const toScore = candidates.filter(needsScoring);
+// Only judged results replace a post: a failed batch or an exhausted budget keeps a post's earlier scores.
+const fresh = (await scorePosts(toScore, { model: llmModel, costs })).filter(alreadyJudged);
 const freshById = new Map(fresh.map((p) => [p.id, p]));
-const unscored = (p: Post): ScoredPost => ({ ...p, relevant: true, score: null, stance: null, extremeness: null });
+const unscored = (p: Post): ScoredPost => ({ ...p, relevant: true, score: null, stance: null, extremeness: null, topic: null });
 const scored: ScoredPost[] = inScope.map((p) => freshById.get(p.id) ?? (alreadyJudged(p) ? (p as ScoredPost) : unscored(p)));
 log.info(`Scoring sample: ${toScore.length} sent to the LLM, ${inScope.length - candidates.length} counted for volume only`);
 
 const runAt = new Date().toISOString();
 // A rescore only appends the posts it newly scored; every other mode saves everything it collected.
-const rows = (mode === 'rescore' ? fresh.filter((p) => p.stance != null) : scored).map((p) => ({ ...p, mode, collectedAt: runAt }));
+const rows = (mode === 'rescore' ? fresh : scored).map((p) => ({ ...p, mode, collectedAt: runAt }));
 await Actor.pushData(rows);
 await postsDataset.pushData(rows);
 
@@ -351,6 +360,9 @@ if (mode === 'backfill' || mode === 'daily' || mode === 'rescore') {
         }
         baseline.days[day].news ??= emptyAgg();
     }
+    // One LLM call per day for its main storylines. A failure keeps that day's previous storylines.
+    const storylines = await storylinesForDays(groupByDay(scored), daysBetween(dateFrom, dateTo), { model: llmModel, costs });
+    if (Object.keys(storylines).length) baseline.storylines = { ...baseline.storylines, ...storylines };
 }
 
 if (quotes.length) baseline.quotes[today] = quotes;
