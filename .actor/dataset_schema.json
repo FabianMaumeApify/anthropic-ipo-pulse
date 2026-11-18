@@ -17,6 +17,10 @@
             "score": { "type": ["number", "null"] },
             "stance": { "type": ["string", "null"] },
             "extremeness": { "type": ["number", "null"] },
+            "topic": {
+                "type": ["string", "null"],
+                "enum": ["valuation", "bubble", "governance", "safety", "access", "rivals", "business", "insiders", "macro", "other", null]
+            },
             "mode": { "type": "string" },
             "collectedAt": { "type": "string" }
         }
@@ -25,7 +29,7 @@
         "overview": {
             "title": "Scored posts",
             "transformation": {
-                "fields": ["platform", "publishedAt", "author", "text", "stance", "score", "extremeness", "engagement", "url"]
+                "fields": ["platform", "publishedAt", "author", "text", "stance", "score", "extremeness", "topic", "engagement", "url"]
             },
             "display": {
                 "component": "table",
@@ -37,6 +41,7 @@
                     "stance": { "label": "Stance" },
                     "score": { "label": "Sentiment", "format": "number" },
                     "extremeness": { "label": "Extremeness", "format": "number" },
+                    "topic": { "label": "Topic" },
                     "engagement": { "label": "Engagement", "format": "number" },
                     "url": { "label": "Link", "format": "link" }
                 }

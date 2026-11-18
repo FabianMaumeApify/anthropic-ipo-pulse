@@ -1,7 +1,7 @@
 import { log } from 'apify';
 
 import type { CostTracker } from './costs.js';
-import type { Post, ScoredPost, Stance } from './types.js';
+import { isTopic, type Post, type ScoredPost, type Stance, type Topic } from './types.js';
 
 export const OPENROUTER_ACTOR = 'apify/openrouter';
 const OPENROUTER_URL = 'https://openrouter.apify.actor/api/v1/chat/completions';
@@ -14,6 +14,17 @@ For EVERY post return an object with:
 - "score": number from -1 (very bearish on Anthropic / the IPO / the stock) to 1 (very bullish). 0 when neutral or purely factual.
 - "stance": "bull", "bear" or "neutral"
 - "extremeness": number from 0 (measured, factual) to 1 (euphoric moon talk like "easy 10x, buy at any price" or doom talk like "bubble, going to zero, fraud"). Measures how over-the-top the conviction is, not how positive.
+- "topic": the post's main theme, exactly one of these keys:
+  "valuation" (price, valuation, IPO pricing, first-day pop),
+  "bubble" (AI bubble or overvaluation fears),
+  "governance" (Long-Term Benefit Trust, founder control, public benefit corporation structure, board),
+  "safety" (AI safety and Anthropic's mission),
+  "access" (retail access, allocations, how and where to buy),
+  "rivals" (comparisons with OpenAI, SpaceX, Nvidia or other listings),
+  "business" (Claude products, revenue, customers, losses, compute),
+  "insiders" (lockups, employee and investor selling, early backers),
+  "macro" (rates, markets, Nasdaq mood),
+  "other" (none of these).
 Reply with JSON only: {"results":[...]} with exactly one object per post.`;
 
 interface LlmResult {
@@ -22,6 +33,7 @@ interface LlmResult {
     score?: number;
     stance?: string;
     extremeness?: number;
+    topic?: string;
 }
 
 interface ChatResponse {
@@ -32,15 +44,20 @@ interface ChatResponse {
 const clamp = (n: unknown, lo: number, hi: number) =>
     typeof n === 'number' && Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : null;
 
-function parseJson(content: string): { results?: LlmResult[] } {
+function parseJson<T>(content: string): T {
     const cleaned = content.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
-    return JSON.parse(cleaned) as { results?: LlmResult[] };
+    return JSON.parse(cleaned) as T;
 }
 
-async function scoreBatch(batch: Post[], model: string, costs: CostTracker): Promise<Map<string, LlmResult>> {
-    const user = batch
-        .map((p) => `<post id="${p.id}" platform="${p.platform}">${p.text.slice(0, 700).replace(/<\/?post[^>]*>/gi, '')}</post>`)
-        .join('\n');
+/** Removes anything that could open or close a <post> element, so post text cannot break out of its tag. */
+export const stripPostTags = (text: string) => text.replace(/<\/?post[^>]*>/gi, '');
+
+/**
+ * One JSON-mode chat completion through the Apify OpenRouter Standby Actor. Its cost goes to the
+ * "llm" step: OpenRouter's reported cost when present, otherwise an estimate at a cheap-model rate.
+ */
+export async function chatJson<T>(opts: { system: string; user: string; model: string; costs: CostTracker }): Promise<T> {
+    const { system, user, model, costs } = opts;
     const res = await fetch(OPENROUTER_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.APIFY_TOKEN}` },
@@ -49,7 +66,7 @@ async function scoreBatch(batch: Post[], model: string, costs: CostTracker): Pro
             temperature: 0,
             response_format: { type: 'json_object' },
             messages: [
-                { role: 'system', content: SYSTEM },
+                { role: 'system', content: system },
                 { role: 'user', content: user },
             ],
         }),
@@ -60,7 +77,12 @@ async function scoreBatch(batch: Post[], model: string, costs: CostTracker): Pro
     const u = json.usage ?? {};
     // Prefer OpenRouter's reported cost; otherwise estimate at a cheap-model rate ($0.30 / $2.50 per 1M tokens).
     costs.add('llm', u.cost ?? ((u.prompt_tokens ?? 0) * 0.3 + (u.completion_tokens ?? 0) * 2.5) / 1e6);
-    const parsed = parseJson(json.choices?.[0]?.message?.content ?? '{}');
+    return parseJson<T>(json.choices?.[0]?.message?.content ?? '{}');
+}
+
+async function scoreBatch(batch: Post[], model: string, costs: CostTracker): Promise<Map<string, LlmResult>> {
+    const user = batch.map((p) => `<post id="${p.id}" platform="${p.platform}">${stripPostTags(p.text.slice(0, 700))}</post>`).join('\n');
+    const parsed = await chatJson<{ results?: LlmResult[] }>({ system: SYSTEM, user, model, costs });
     return new Map((parsed.results ?? []).map((r) => [r.id, r]));
 }
 
@@ -117,14 +139,19 @@ export async function scorePosts(
 
     return posts.map((p) => {
         const r = results.get(p.id);
-        if (!r) return { ...p, relevant: true, score: null, stance: null, extremeness: null };
+        if (!r) return { ...p, relevant: true, score: null, stance: null, extremeness: null, topic: null };
         const stance: Stance = r.stance === 'bull' || r.stance === 'bear' ? r.stance : 'neutral';
+        const relevant = r.relevant !== false;
+        // Only posts about Anthropic get a theme; a missing or unknown key falls back to "other".
+        let topic: Topic | null = null;
+        if (relevant) topic = isTopic(r.topic) ? r.topic : 'other';
         return {
             ...p,
-            relevant: r.relevant !== false,
+            relevant,
             score: clamp(r.score, -1, 1),
             stance,
             extremeness: clamp(r.extremeness, 0, 1),
+            topic,
         };
     });
 }

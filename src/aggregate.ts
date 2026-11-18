@@ -1,8 +1,10 @@
-import type { Agg, Platform, QuoteCard, ScoredPost } from './types.js';
+import type { Agg, Platform, QuoteCard, ScoredPost, TopicTally } from './types.js';
 
 const QUOTES_PER_SIDE = 3;
 /** Candidate pool kept per side so later merges (news sweeps) can still re-rank. */
 const POOL_PER_SIDE = 8;
+/** A take at or above this extremeness counts towards extremeBull / extremeBear. */
+export const EXTREME_THRESHOLD = 0.7;
 
 export function emptyAgg(): Agg {
     return {
@@ -17,6 +19,9 @@ export function emptyAgg(): Agg {
         capped: false,
         topBull: [],
         topBear: [],
+        topics: {},
+        extremeBull: 0,
+        extremeBear: 0,
         updatedAt: new Date().toISOString(),
     };
 }
@@ -67,6 +72,9 @@ export function aggregate(posts: ScoredPost[], capped = false): Agg {
     agg.relevant = Math.round(posts.length * rate);
     const bulls: QuoteCard[] = [];
     const bears: QuoteCard[] = [];
+    const topics: TopicTally = {};
+    let extremeBull = 0;
+    let extremeBear = 0;
     for (const p of posts) {
         if (!p.relevant) continue; // unscored posts are relevant: true, judged irrelevant ones are not
         agg.engagement += p.engagement;
@@ -76,14 +84,45 @@ export function aggregate(posts: ScoredPost[], capped = false): Agg {
         if (p.stance === 'bull') agg.bull++;
         else if (p.stance === 'bear') agg.bear++;
         else agg.neutral++;
+        if ((p.extremeness ?? 0) >= EXTREME_THRESHOLD) {
+            if (p.stance === 'bull') extremeBull++;
+            else if (p.stance === 'bear') extremeBear++;
+        }
+        // Posts scored before themes existed have no topic and stay out of the tallies.
+        if (p.topic) {
+            const t = topics[p.topic] ?? { n: 0, sentimentSum: 0 };
+            t.n++;
+            t.sentimentSum += p.score;
+            topics[p.topic] = t;
+        }
         if (p.text.length < 40) continue; // too short to be a useful quote
         if (p.stance === 'bull' && p.score > 0) bulls.push(toCard(p));
         if (p.stance === 'bear' && p.score < 0) bears.push(toCard(p));
     }
     agg.topBull = rank(bulls).slice(0, POOL_PER_SIDE);
     agg.topBear = rank(bears).slice(0, POOL_PER_SIDE);
+    agg.topics = topics;
+    agg.extremeBull = extremeBull;
+    agg.extremeBear = extremeBear;
     return agg;
 }
+
+/** Adds two topic tallies; undefined when neither side has one (days aggregated before themes existed). */
+export function mergeTopics(a: TopicTally | undefined, b: TopicTally | undefined): TopicTally | undefined {
+    if (!a && !b) return undefined;
+    const out: TopicTally = {};
+    for (const side of [a, b]) {
+        for (const [topic, t] of Object.entries(side ?? {}) as [keyof TopicTally, { n: number; sentimentSum: number }][]) {
+            const o = out[topic] ?? { n: 0, sentimentSum: 0 };
+            o.n += t.n;
+            o.sentimentSum += t.sentimentSum;
+            out[topic] = o;
+        }
+    }
+    return out;
+}
+
+const addOptional = (a: number | undefined, b: number | undefined) => (a == null && b == null ? undefined : (a ?? 0) + (b ?? 0));
 
 /** Adds two aggregates (used by the news sweep, which sees each story only once). */
 export function mergeAgg(a: Agg | undefined, b: Agg): Agg {
@@ -101,6 +140,9 @@ export function mergeAgg(a: Agg | undefined, b: Agg): Agg {
         capped: a.capped || b.capped,
         topBull: rank([...a.topBull, ...b.topBull]).slice(0, POOL_PER_SIDE),
         topBear: rank([...a.topBear, ...b.topBear]).slice(0, POOL_PER_SIDE),
+        topics: mergeTopics(a.topics, b.topics),
+        extremeBull: addOptional(a.extremeBull, b.extremeBull),
+        extremeBear: addOptional(a.extremeBear, b.extremeBear),
         updatedAt: new Date().toISOString(),
     };
 }

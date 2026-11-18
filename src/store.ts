@@ -1,8 +1,18 @@
 import { Actor } from 'apify';
 
-import type { Baseline, CostLedger, LiveSnapshot } from './types.js';
+import type { Baseline, CostLedger, LiveSnapshot, TopicTally } from './types.js';
 
 type Kvs = Awaited<ReturnType<typeof Actor.openKeyValueStore>>;
+
+/** Topic tally for the timeline: only topics that occurred, sentiment sums rounded to 3 decimals. */
+export function compactTopics(topics: TopicTally | undefined): TopicTally | undefined {
+    if (!topics) return undefined;
+    return Object.fromEntries(
+        Object.entries(topics)
+            .filter(([, t]) => t.n > 0)
+            .map(([k, t]) => [k, { n: t.n, sentimentSum: Math.round(t.sentimentSum * 1000) / 1000 }]),
+    );
+}
 
 /**
  * Named storages persist across runs and are what the website reads. `forceCloud` makes local
@@ -39,7 +49,15 @@ export class TrackerStore {
             platforms: Object.fromEntries(
                 Object.entries(live.platforms).map(([p, a]) => [
                     p,
-                    { volume: a.volume, relevant: a.relevant, scored: a.scored, sentimentSum: a.sentimentSum, bull: a.bull, bear: a.bear },
+                    {
+                        volume: a.volume,
+                        relevant: a.relevant,
+                        scored: a.scored,
+                        sentimentSum: a.sentimentSum,
+                        bull: a.bull,
+                        bear: a.bear,
+                        topics: compactTopics(a.topics),
+                    },
                 ]),
             ),
             quotes: live.quotes.map((q) => ({ symbol: q.symbol, price: q.price, changePercent: q.changePercent })),
