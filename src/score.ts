@@ -75,8 +75,8 @@ export async function chatJson<T>(opts: { system: string; user: string; model: s
     if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${(await res.text()).slice(0, 300)}`);
     const json = (await res.json()) as ChatResponse;
     const u = json.usage ?? {};
-    // Prefer OpenRouter's reported cost; otherwise estimate at a cheap-model rate ($0.30 / $2.50 per 1M tokens).
-    costs.add('llm', u.cost ?? ((u.prompt_tokens ?? 0) * 0.3 + (u.completion_tokens ?? 0) * 2.5) / 1e6);
+    // Prefer OpenRouter's reported cost; otherwise estimate at Haiku 3.5 rates ($1 / $5 per 1M tokens).
+    costs.add('llm', u.cost ?? ((u.prompt_tokens ?? 0) * 1.0 + (u.completion_tokens ?? 0) * 5.0) / 1e6);
     return parseJson<T>(json.choices?.[0]?.message?.content ?? '{}');
 }
 

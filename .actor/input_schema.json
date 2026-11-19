@@ -81,7 +81,7 @@
             "type": "string",
             "description": "Model id used through the Apify OpenRouter Actor to score each post.",
             "editor": "textfield",
-            "default": "google/gemini-2.5-flash"
+            "default": "anthropic/claude-haiku-3.5"
         },
         "maxXTweetsPerDay": {
             "title": "Max X tweets per day",
