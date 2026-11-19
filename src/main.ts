@@ -46,7 +46,7 @@ const xQuery = input.xQuery ?? 'Anthropic (IPO OR stock OR shares OR valuation O
 const searchQueries = input.searchQueries ?? ['Anthropic IPO', 'Anthropic stock', 'Anthropic valuation'];
 const liveTicker = (input.liveTicker ?? 'ANT').toUpperCase();
 const peers = (input.peerTickers ?? ['AMZN', 'GOOGL', 'NVDA', 'MSFT', 'QQQ']).map((s) => s.toUpperCase());
-const llmModel = input.llmModel ?? 'anthropic/claude-haiku-3.5';
+const llmModel = input.llmModel ?? 'anthropic/claude-haiku-5.5';
 const maxXPerDay = input.maxXTweetsPerDay ?? 1000;
 const maxXLive = input.maxXTweetsLive ?? 500;
 const maxLinkedIn = input.maxLinkedInPostsPerQuery ?? 50;
